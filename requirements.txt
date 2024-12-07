@@ -1,0 +1,4 @@
+polib>=1.2.0
+deepl>=1.16.1
+tqdm>=4.66.1
+python-dotenv>=1.0.0 
