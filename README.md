@@ -33,6 +33,20 @@ This project provides a set of scripts to automate the translation of PO files c
 - python-dotenv: For environment variable management
 - tqdm: For progress bar functionality
 
+## Obtaining a DeepL API Key
+
+To use this translation tool, you'll need a DeepL API key. Follow these steps to get started:
+
+1. **Create an Account**: Sign up at [DeepL.com](https://www.deepl.com)
+2. **Access API Keys**: Go to your account and navigate to the 'API Keys' section
+3. **Create New Key**: Click 'Create key' to generate a new API key
+4. **Choose Plan**: Select either:
+   - **Free Plan**: 500,000 characters/month
+   - **Pro Plan**: Unlimited translations with advanced features
+5. **Security Note**: Keep your API key confidential and never expose it in publicly distributed code
+
+For more details, visit the [DeepL API Documentation](https://developers.deepl.com/docs/getting-started/auth)
+
 ## Setup
 
 1. Clone the repository
