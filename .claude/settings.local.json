@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m \"$(cat <<''EOF''\ndocs: Add comprehensive documentation and implement performance optimizations\n\n- Added CLAUDE.md with project overview and development guidelines\n- Added CRUSH.md with code style conventions\n- Added OPTIMIZATION_GUIDE.md detailing 6 major performance improvements\n- Added SECURITY.md with security best practices\n- Enhanced README.md with detailed feature documentation and usage examples\n- Updated .gitignore to exclude cache and progress files\n- Implemented all 6 optimizations in translate-po-multiple.py:\n  * Translation caching for repeated strings\n  * Batch translation (DeepL/Google)\n  * Parallel processing with ThreadPoolExecutor\n  * Progress persistence for resumable translations\n  * Compiled regex patterns for 20-30% speed boost\n  * Memory-efficient processing for large files\n- Enhanced translate-po.py with comprehensive inline documentation\n\nPerformance improvements: 80-95% faster for large files with caching and batching\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
