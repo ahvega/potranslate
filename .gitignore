@@ -43,3 +43,10 @@ Thumbs.db
 *.po
 !requirements.txt
 translator-450208-74f3fffcc975.json
+
+# Translation cache and progress files
+.translation_cache/
+*.progress
+
+# Crush
+.crush/

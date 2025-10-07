@@ -24,7 +24,7 @@ def main():
     # Optional: target-lang - Target language code (defaults to ES for Spanish)
     parser = argparse.ArgumentParser(description='Translate PO file using DeepL API')
     parser.add_argument('input_file', help='Input PO file to translate')
-    parser.add_argument('--target-lang', default='ES', 
+    parser.add_argument('--target-lang', default='ES',
                        help='Target language code (default: ES)')
     args = parser.parse_args()
 
@@ -32,7 +32,7 @@ def main():
     # File should contain: DEEPL_API_KEY=your_api_key
     load_dotenv()
     api_key = os.getenv('DEEPL_API_KEY')
-    
+
     if not api_key:
         print("Error: DEEPL_API_KEY not found in .env file")
         exit(1)

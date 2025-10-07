@@ -11,6 +11,12 @@ import requests
 import logging
 import time
 import json
+import re
+import hashlib
+import pickle
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple, Dict, Optional
 from openai import OpenAI
 from google.cloud import translate_v3
 
@@ -18,9 +24,49 @@ from google.cloud import translate_v3
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def isolate_html_and_variables(text):
+# Compile regex patterns for better performance
+HTML_TAG_PATTERN = re.compile(r'<[^>]+>')
+VARIABLE_PATTERN = re.compile(r'%[sd]|{[0-9]+}')
+HTML_PLACEHOLDER = '{{HTML}}'
+VAR_PLACEHOLDER = '{{VAR}}'
+
+# Cache directory
+CACHE_DIR = Path('.translation_cache')
+CACHE_DIR.mkdir(exist_ok=True)
+
+def get_cache_key(text: str, target_lang: str, api: str) -> str:
+    """Generate a unique cache key for a translation."""
+    content = f"{text}|{target_lang}|{api}"
+    return hashlib.md5(content.encode('utf-8')).hexdigest()
+
+def get_cached_translation(text: str, target_lang: str, api: str) -> Optional[str]:
+    """Retrieve cached translation if available."""
+    cache_key = get_cache_key(text, target_lang, api)
+    cache_file = CACHE_DIR / f"{cache_key}.pkl"
+
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load cache: {e}")
+            return None
+    return None
+
+def save_to_cache(text: str, target_lang: str, api: str, translation: str):
+    """Save translation to cache."""
+    cache_key = get_cache_key(text, target_lang, api)
+    cache_file = CACHE_DIR / f"{cache_key}.pkl"
+
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump(translation, f)
+    except Exception as e:
+        logger.warning(f"Failed to save to cache: {e}")
+
+def isolate_html_and_variables(text: str) -> Tuple[str, List[str], List[str]]:
     """
-    Isolates HTML tags and variables from a string.
+    Isolates HTML tags and variables from a string using compiled regex patterns.
 
     Args:
         text (str): The string to process.
@@ -28,14 +74,13 @@ def isolate_html_and_variables(text):
     Returns:
         tuple: (cleaned_text, html_tags, variables)
     """
-    import re
-    html_tags = re.findall(r'<[^>]+>', text)
-    variables = re.findall(r'%[sd]|{[0-9]+}', text)
-    cleaned_text = re.sub(r'<[^>]+>', '{{HTML}}', text)
-    cleaned_text = re.sub(r'%[sd]|{[0-9]+}', '{{VAR}}', cleaned_text)
+    html_tags = HTML_TAG_PATTERN.findall(text)
+    variables = VARIABLE_PATTERN.findall(text)
+    cleaned_text = HTML_TAG_PATTERN.sub(HTML_PLACEHOLDER, text)
+    cleaned_text = VARIABLE_PATTERN.sub(VAR_PLACEHOLDER, cleaned_text)
     return cleaned_text, html_tags, variables
 
-def reinsert_html_and_variables(text, html_tags, variables):
+def reinsert_html_and_variables(text: str, html_tags: List[str], variables: List[str]) -> str:
     """
     Re-inserts HTML tags and variables into a translated string.
 
@@ -47,14 +92,13 @@ def reinsert_html_and_variables(text, html_tags, variables):
     Returns:
         str: The reconstructed string.
     """
-    import re
     for tag in html_tags:
-        text = re.sub(r'{{HTML}}', tag, text, count=1)
+        text = text.replace(HTML_PLACEHOLDER, tag, 1)
     for var in variables:
-        text = re.sub(r'{{VAR}}', var, text, count=1)
+        text = text.replace(VAR_PLACEHOLDER, var, 1)
     return text
 
-def translate_string(text, target_lang='es', preserve_formatting=True, api='deepl'):
+def translate_string(text: str, target_lang: str = 'es', preserve_formatting: bool = True, api: str = 'deepl', use_cache: bool = True) -> str:
     """
     Translates a string while preserving HTML tags, variables, and code-like sections.
 
@@ -63,10 +107,20 @@ def translate_string(text, target_lang='es', preserve_formatting=True, api='deep
         target_lang (str): Target language code (default: 'es').
         preserve_formatting (bool): Whether to preserve HTML/php syntax (default: True).
         api (str): Translation API to use ('deepl', 'deepseek', 'azure', 'google').
+        use_cache (bool): Whether to use caching (default: True).
 
     Returns:
         str: The translated string.
     """
+    # Check cache first
+    if use_cache:
+        cached = get_cached_translation(text, target_lang, api)
+        if cached:
+            logger.debug(f"Cache hit for: {text[:50]}...")
+            return cached
+
+    translated_text = None
+
     if api == 'deepl':
         import deepl
         translator = deepl.Translator(os.getenv('DEEPL_API_KEY'))
@@ -75,7 +129,7 @@ def translate_string(text, target_lang='es', preserve_formatting=True, api='deep
             target_lang=target_lang,
             preserve_formatting=preserve_formatting
         )
-        return result.text
+        translated_text = result.text
     elif api == 'deepseek':
         # Initialize OpenAI client with DeepSeek's base URL
         client = OpenAI(
@@ -103,7 +157,8 @@ def translate_string(text, target_lang='es', preserve_formatting=True, api='deep
                 )
                 # Print raw response for debugging
                 print(f"Raw API Response: {response}")
-                return response.choices[0].message.content
+                translated_text = response.choices[0].message.content
+                break
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise Exception(f"Failed after {max_retries} retries: {str(e)}")
@@ -146,59 +201,162 @@ def translate_string(text, target_lang='es', preserve_formatting=True, api='deep
                     if response.translations:
                         translated_text = response.translations[0].translated_text
                         print(f"Translated: {text} -> {translated_text}")
-                        return translated_text
+                        break
                     else:
                         raise Exception("No translation returned from Google API")
-                        
+
                 except Exception as e:
                     if attempt == max_retries - 1:
                         raise Exception(f"Failed after {max_retries} retries: {str(e)}")
                     print(f"Retrying ({attempt + 1}/{max_retries})... Error: {str(e)}")
                     time.sleep(2 ** attempt)
-                    
+
         except Exception as e:
             logger.error(f"Google Translation error: {str(e)}")
             raise
     else:
         raise ValueError(f"Unsupported API: {api}")
 
-    return text
+    # Save to cache before returning
+    if translated_text and use_cache:
+        save_to_cache(text, target_lang, api, translated_text)
 
-def translate_bulk(strings, target_lang='es', api='deepseek'):
+    return translated_text if translated_text else text
+
+def translate_batch(strings: List[str], target_lang: str = 'es', api: str = 'deepl', use_cache: bool = True) -> List[str]:
     """
-    Translates a batch of strings using the DeepSeek Chat API.
+    Translates a batch of strings using the specified API.
 
     Args:
         strings (list): List of strings to translate.
         target_lang (str): Target language code (default: 'es').
-        api (str): Translation API to use ('deepseek').
+        api (str): Translation API to use ('deepl', 'deepseek', 'google').
+        use_cache (bool): Whether to use caching (default: True).
 
     Returns:
         list: List of translated strings.
     """
-    headers = {
-        'Authorization': f'Bearer {os.getenv("DEEPSEEK_API_KEY")}',
-        'Content-Type': 'application/json'
-    }
-    prompt = (
-        "You are a professional translator. Translate the following strings to {target_lang} while "
-        "preserving HTML tags, variables, and placeholders. Do not modify the structure of the text. "
-        "Here are the strings to translate:\n\n{text}"
-    ).format(target_lang=target_lang, text='\n'.join(strings))
-    data = {
-        'model': 'deepseek-chat',
-        'messages': [{'role': 'user', 'content': prompt}]
-    }
-    response = requests.post(
-        'https://api.deepseek.com/v1/chat/completions',
-        headers=headers,
-        json=data
-    )
-    if response.status_code == 200:
-        translated_text = response.json()['choices'][0]['message']['content']
-        return translated_text.split('\n')
+    if api == 'deepl':
+        import deepl
+        translator = deepl.Translator(os.getenv('DEEPL_API_KEY'))
+
+        # Separate cached and uncached strings
+        results = [None] * len(strings)
+        to_translate = []
+        to_translate_indices = []
+
+        for i, text in enumerate(strings):
+            if use_cache:
+                cached = get_cached_translation(text, target_lang, api)
+                if cached:
+                    results[i] = cached
+                    continue
+            to_translate.append(text)
+            to_translate_indices.append(i)
+
+        # Batch translate uncached strings
+        if to_translate:
+            try:
+                translations = translator.translate_text(to_translate, target_lang=target_lang)
+                for idx, translation in zip(to_translate_indices, translations):
+                    translated = translation.text
+                    results[idx] = translated
+                    if use_cache:
+                        save_to_cache(strings[idx], target_lang, api, translated)
+            except Exception as e:
+                logger.error(f"Batch translation error: {e}")
+                # Fallback to individual translation
+                for idx in to_translate_indices:
+                    results[idx] = translate_string(strings[idx], target_lang, api=api, use_cache=use_cache)
+
+        return results
+
+    elif api == 'google':
+        client = translate_v3.TranslationServiceClient()
+        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        parent = f"projects/{project_id}/locations/global"
+
+        lang_mapping = {
+            'es_ES': 'es', 'en_US': 'en', 'fr_FR': 'fr',
+        }
+        google_lang_code = lang_mapping.get(target_lang, target_lang.split('_')[0].lower())
+
+        # Separate cached and uncached strings
+        results = [None] * len(strings)
+        to_translate = []
+        to_translate_indices = []
+
+        for i, text in enumerate(strings):
+            if use_cache:
+                cached = get_cached_translation(text, target_lang, api)
+                if cached:
+                    results[i] = cached
+                    continue
+            to_translate.append(text)
+            to_translate_indices.append(i)
+
+        # Batch translate (Google supports up to 100 items per request)
+        if to_translate:
+            batch_size = 100
+            for batch_start in range(0, len(to_translate), batch_size):
+                batch_end = min(batch_start + batch_size, len(to_translate))
+                batch = to_translate[batch_start:batch_end]
+                batch_indices = to_translate_indices[batch_start:batch_end]
+
+                try:
+                    response = client.translate_text(
+                        contents=batch,
+                        target_language_code=google_lang_code,
+                        parent=parent,
+                        mime_type="text/plain",
+                        source_language_code="en"
+                    )
+
+                    for idx, translation in zip(batch_indices, response.translations):
+                        translated = translation.translated_text
+                        results[idx] = translated
+                        if use_cache:
+                            save_to_cache(strings[idx], target_lang, api, translated)
+                except Exception as e:
+                    logger.error(f"Batch translation error: {e}")
+                    for idx in batch_indices:
+                        results[idx] = translate_string(strings[idx], target_lang, api=api, use_cache=use_cache)
+
+        return results
+
     else:
-        raise Exception(f"DeepSeek API Error: {response.status_code} - {response.text}")
+        # Fallback to individual translations for other APIs
+        return [translate_string(s, target_lang, api=api, use_cache=use_cache) for s in strings]
+
+def save_progress(output_file: str, translated_count: int):
+    """Save translation progress to resume later."""
+    progress_file = Path(output_file).with_suffix('.progress')
+    try:
+        with open(progress_file, 'w') as f:
+            json.dump({'translated_count': translated_count}, f)
+    except Exception as e:
+        logger.warning(f"Failed to save progress: {e}")
+
+def load_progress(output_file: str) -> int:
+    """Load translation progress if available."""
+    progress_file = Path(output_file).with_suffix('.progress')
+    if progress_file.exists():
+        try:
+            with open(progress_file, 'r') as f:
+                data = json.load(f)
+                return data.get('translated_count', 0)
+        except Exception as e:
+            logger.warning(f"Failed to load progress: {e}")
+    return 0
+
+def translate_entry_wrapper(args_tuple):
+    """Wrapper for parallel translation."""
+    entry, target_lang, api, use_cache = args_tuple
+    try:
+        translation = translate_string(entry.msgid, target_lang, api=api, use_cache=use_cache)
+        return (entry, translation, None)
+    except Exception as e:
+        return (entry, None, str(e))
 
 def main():
     # Parse command line arguments
@@ -209,6 +367,16 @@ def main():
                       help='Translation API to use (default: deepl)')
     parser.add_argument('--target-lang', default='es',
                       help='Target language code (default: es)')
+    parser.add_argument('--batch-size', type=int, default=10,
+                      help='Number of strings to translate in a batch (default: 10)')
+    parser.add_argument('--parallel', type=int, default=1,
+                      help='Number of parallel translation workers (default: 1)')
+    parser.add_argument('--no-cache', action='store_true',
+                      help='Disable translation caching')
+    parser.add_argument('--resume', action='store_true',
+                      help='Resume from previous progress')
+    parser.add_argument('--delay', type=float, default=0.5,
+                      help='Delay between translations in seconds (default: 0.5)')
     args = parser.parse_args()
 
     # Load API keys from environment
@@ -216,24 +384,104 @@ def main():
 
     # Read and parse PO file
     po = polib.pofile(args.input_file)
-    
+
     # Get all untranslated entries
     untranslated = po.untranslated_entries()
     logger.info(f"Found {len(untranslated)} untranslated entries")
-    
-    # Process all untranslated entries
-    for entry in tqdm(untranslated, desc="Translating"):
-        try:
-            entry.msgstr = translate_string(entry.msgid, args.target_lang, api=args.api)
-            # Add a small delay to avoid hitting rate limits
-            time.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Error translating '{entry.msgid}': {str(e)}")
-            continue
 
-    # Save translated file
+    # Load progress if resuming
+    start_index = 0
+    if args.resume:
+        start_index = load_progress(args.output_file)
+        if start_index > 0:
+            logger.info(f"Resuming from entry {start_index}")
+            untranslated = untranslated[start_index:]
+
+    use_cache = not args.no_cache
+
+    # Use batch translation if batch_size > 1 and API supports it
+    if args.batch_size > 1 and args.api in ['deepl', 'google']:
+        logger.info(f"Using batch translation with batch size: {args.batch_size}")
+
+        for batch_start in tqdm(range(0, len(untranslated), args.batch_size), desc="Translating batches"):
+            batch_end = min(batch_start + args.batch_size, len(untranslated))
+            batch = untranslated[batch_start:batch_end]
+
+            try:
+                msgids = [entry.msgid for entry in batch]
+                translations = translate_batch(msgids, args.target_lang, api=args.api, use_cache=use_cache)
+
+                for entry, translation in zip(batch, translations):
+                    entry.msgstr = translation
+
+                # Save progress periodically
+                if (batch_start + args.batch_size) % 50 == 0:
+                    po.save(args.output_file)
+                    save_progress(args.output_file, start_index + batch_end)
+
+                time.sleep(args.delay)
+
+            except Exception as e:
+                logger.error(f"Error in batch translation: {str(e)}")
+                # Fallback to individual translation
+                for entry in batch:
+                    try:
+                        entry.msgstr = translate_string(entry.msgid, args.target_lang, api=args.api, use_cache=use_cache)
+                        time.sleep(args.delay)
+                    except Exception as e2:
+                        logger.error(f"Error translating '{entry.msgid}': {str(e2)}")
+                        continue
+
+    # Use parallel translation if parallel > 1
+    elif args.parallel > 1:
+        logger.info(f"Using {args.parallel} parallel workers")
+
+        with ThreadPoolExecutor(max_workers=args.parallel) as executor:
+            futures = []
+            for entry in untranslated:
+                future = executor.submit(translate_entry_wrapper, (entry, args.target_lang, args.api, use_cache))
+                futures.append(future)
+
+            completed = 0
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Translating"):
+                entry, translation, error = future.result()
+                if error:
+                    logger.error(f"Error translating '{entry.msgid}': {error}")
+                else:
+                    entry.msgstr = translation
+
+                completed += 1
+                if completed % 50 == 0:
+                    po.save(args.output_file)
+                    save_progress(args.output_file, start_index + completed)
+
+                time.sleep(args.delay / args.parallel)  # Adjust delay for parallel workers
+
+    # Standard sequential translation
+    else:
+        for idx, entry in enumerate(tqdm(untranslated, desc="Translating")):
+            try:
+                entry.msgstr = translate_string(entry.msgid, args.target_lang, api=args.api, use_cache=use_cache)
+
+                # Save progress periodically
+                if (idx + 1) % 50 == 0:
+                    po.save(args.output_file)
+                    save_progress(args.output_file, start_index + idx + 1)
+
+                time.sleep(args.delay)
+
+            except Exception as e:
+                logger.error(f"Error translating '{entry.msgid}': {str(e)}")
+                continue
+
+    # Save final translated file
     po.save(args.output_file)
     logger.info(f"Translation complete. Saved to {args.output_file}")
+
+    # Clean up progress file
+    progress_file = Path(args.output_file).with_suffix('.progress')
+    if progress_file.exists():
+        progress_file.unlink()
 
 if __name__ == '__main__':
     main()
