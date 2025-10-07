@@ -149,17 +149,20 @@ google-cloud-translate # Google Cloud Translate v3
 ## 🚀 Installation
 
 ### 1. Clone the Repository
+
 ```powershell
 git clone <repository-url>
 cd potranslate
 ```
 
 ### 2. Create Virtual Environment
+
 ```powershell
 python -m venv .venv
 ```
 
 ### 3. Activate Virtual Environment
+
 ```powershell
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
@@ -172,6 +175,7 @@ source .venv/bin/activate
 ```
 
 ### 4. Install Dependencies
+
 ```powershell
 pip install -r requirements.txt
 ```
@@ -237,12 +241,14 @@ python translate-po-multiple.py large.po output.po --api deepl --batch-size 30 -
 ### PowerShell Automation Scripts
 
 #### Direct Translation
+
 ```powershell
 # Translate a PO file using the virtual environment wrapper
 .\trans-po.ps1 -filename "path\to\file.po"
 ```
 
 #### Download Folder Workflow
+
 ```powershell
 # Process file from Downloads (for WordPress plugin translations)
 .\process-po.ps1 -FilePrefix "elementor-1142"
@@ -254,6 +260,7 @@ python translate-po-multiple.py large.po output.po --api deepl --batch-size 30 -
 ### WordPress Translation Workflow
 
 #### 1. Generate POT and PO Files
+
 ```powershell
 # Create PO file for Spanish
 .\make-po.ps1 es
@@ -262,12 +269,14 @@ python translate-po-multiple.py large.po output.po --api deepl --batch-size 30 -
 ```
 
 #### 2. Translate the PO File
+
 ```powershell
 # Translate using optimized batch processing
 .\trans-po.ps1 -filename "languages\your-plugin-es_ES.po"
 ```
 
 #### 3. Compile to MO File
+
 ```powershell
 # Compile for WordPress
 .\make-mo.ps1 es
@@ -295,11 +304,13 @@ Options:
 #### Example Configurations
 
 **Small Files (< 500 entries)**
+
 ```powershell
 python translate-po-multiple.py input.po output.po --api deepl
 ```
 
 **Medium Files (500-5000 entries)**
+
 ```powershell
 # DeepL
 python translate-po-multiple.py input.po output.po --api deepl --batch-size 20
@@ -309,6 +320,7 @@ python translate-po-multiple.py input.po output.po --api google --batch-size 50
 ```
 
 **Large Files (5000+ entries)**
+
 ```powershell
 # DeepL with resume capability
 python translate-po-multiple.py input.po output.po \
@@ -324,6 +336,7 @@ python translate-po-multiple.py input.po output.po \
 ```
 
 **DeepSeek (no batch support)**
+
 ```powershell
 python translate-po-multiple.py input.po output.po \
   --api deepseek \
@@ -332,6 +345,7 @@ python translate-po-multiple.py input.po output.po \
 ```
 
 **Development/Testing**
+
 ```powershell
 # Force fresh translations without cache
 python translate-po-multiple.py test.po output.po \
@@ -414,10 +428,12 @@ potranslate/
 ## Output File Formats
 
 ### Standard Translation
+
 - **Input**: `filename-es.po`
 - **Output**: `filename-es_ES.po`
 
 ### WordPress Translation
+
 - **POT**: `plugin-name.pot` (translation template)
 - **PO**: `plugin-name-es_ES.po` (Spanish translations)
 - **MO**: `plugin-name-es_ES.mo` (compiled binary)
@@ -432,6 +448,7 @@ potranslate/
 **Symptoms**: API returns "Too Many Requests"
 
 **Solutions**:
+
 ```bash
 # Increase delay between requests
 --delay 1.0
@@ -451,6 +468,7 @@ potranslate/
 **Symptoms**: Process crashes with memory errors
 
 **Solutions**:
+
 ```bash
 # Reduce batch size
 --batch-size 5
@@ -467,6 +485,7 @@ potranslate/
 **Symptoms**: Translations seem slow on repeat runs
 
 **Solutions**:
+
 1. ✅ Check if `.translation_cache/` directory exists
 2. ✅ Verify `.pkl` files are being created
 3. ✅ Ensure not using `--no-cache` flag
@@ -480,6 +499,7 @@ potranslate/
 **Symptoms**: Resume fails or restarts from beginning
 
 **Solutions**:
+
 ```bash
 # Delete progress file and restart
 rm output.po.progress
@@ -492,15 +512,18 @@ python translate-po-multiple.py input.po output.po --resume
 <summary><b>🔐 API Authentication Errors</b></summary>
 
 **DeepL**:
+
 - ✅ Verify `DEEPL_API_KEY` in `.env`
 - ✅ Check API key validity at DeepL dashboard
 
 **Google**:
+
 - ✅ Verify `GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS`
 - ✅ Ensure service account has Translation API permissions
 - ✅ Check JSON key file path is correct
 
 **DeepSeek**:
+
 - ✅ Verify `DEEPSEEK_API_KEY` in `.env`
 - ✅ Check account has sufficient credits
 
@@ -509,6 +532,7 @@ python translate-po-multiple.py input.po output.po --resume
 ### Debugging
 
 Enable debug logging:
+
 ```powershell
 # Set logging level to DEBUG in script
 # Or use Python logging configuration
@@ -516,6 +540,7 @@ python -u translate-po-multiple.py input.po output.po --api deepl
 ```
 
 View cache contents:
+
 ```powershell
 # Check cache directory
 ls .translation_cache/
@@ -525,6 +550,7 @@ ls .translation_cache/
 ```
 
 Monitor progress file:
+
 ```powershell
 # Watch progress in real-time
 Get-Content output.po.progress -Wait
